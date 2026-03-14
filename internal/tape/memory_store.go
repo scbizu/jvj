@@ -90,3 +90,17 @@ func (s *InMemoryStore) GetTape(_ context.Context, sessionID string) (*Tape, err
 	copyTape := *tp
 	return &copyTape, nil
 }
+
+func (s *InMemoryStore) SeqsFrom(_ context.Context, sessionID string, fromSeq uint64) []uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	entries := s.entries[sessionID]
+	seqs := make([]uint64, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Seq >= fromSeq {
+			seqs = append(seqs, entry.Seq)
+		}
+	}
+	return seqs
+}

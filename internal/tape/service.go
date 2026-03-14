@@ -12,6 +12,7 @@ type Store interface {
 	PutAnchor(context.Context, string, *Anchor) error
 	GetLatestAnchor(context.Context, string) (*Anchor, error)
 	GetTape(context.Context, string) (*Tape, error)
+	SeqsFrom(context.Context, string, uint64) []uint64
 }
 
 type Service struct {
@@ -86,4 +87,47 @@ func (s *Service) CreateAnchor(ctx context.Context, sessionID string, in CreateA
 		return nil, err
 	}
 	return anchor, nil
+}
+
+func (s *Service) Handoff(ctx context.Context, sessionID string, in HandoffInput) (*Anchor, error) {
+	entry, err := s.Append(ctx, sessionID, AppendInput{
+		Kind:    EntryHandoff,
+		Content: in.Summary,
+		Actor:   in.Owner,
+		Metadata: map[string]any{
+			"next_steps":  in.NextSteps,
+			"source_seqs": in.SourceSeqs,
+			"phase_tag":   in.PhaseTag,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return s.CreateAnchor(ctx, sessionID, CreateAnchorInput{
+		PhaseTag:   in.PhaseTag,
+		Summary:    in.Summary,
+		SourceSeqs: in.SourceSeqs,
+		State:      in.StateDelta,
+		Owner:      in.Owner,
+		AtSeq:      entry.Seq,
+	})
+}
+
+func (s *Service) BuildView(ctx context.Context, req ViewRequest) (*View, error) {
+	if anchor, err := s.store.GetLatestAnchor(ctx, req.SessionID); err == nil && anchor != nil {
+		return &View{
+			SessionID:    req.SessionID,
+			AnchorID:     anchor.ID,
+			IncludedSeqs: s.store.SeqsFrom(ctx, req.SessionID, anchor.AtSeq),
+			Provenance:   anchor.SourceSeqs,
+		}, nil
+	}
+
+	seqs := s.store.SeqsFrom(ctx, req.SessionID, 1)
+	return &View{
+		SessionID:    req.SessionID,
+		IncludedSeqs: seqs,
+		Provenance:   seqs,
+	}, nil
 }

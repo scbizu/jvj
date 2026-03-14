@@ -59,3 +59,12 @@ type CreateAnchorInput struct {
 	Owner      string
 	AtSeq      uint64
 }
+
+type HandoffInput struct {
+	Summary    string
+	NextSteps  []string
+	SourceSeqs []uint64
+	Owner      string
+	PhaseTag   string
+	StateDelta map[string]any
+}
