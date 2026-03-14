@@ -1,25 +1,22 @@
-# Message Bus Runtime Implementation Plan
-
-> 状态：**Deferred（本轮不执行代码实现）**  
-> 原因：你已明确“不授权在当前 master 执行”，且当前仓库无 HEAD 无法创建 worktree；本计划保留为下一轮代码实施基线。
+# Message Bus Runtime Implementation
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 基于已完成的架构细化，后续落地 Message Bus 入口并支持 Discord/Telegram Bot，包含命令执行安全与依赖安装策略。
+**Goal:** Implement the Message Bus ingress path for Discord and Telegram, including command-execution safety and dependency-install policy enforcement.
 
-**Architecture:** 以 `internal/transport/message_bus.go` 作为统一入口，Discord/Telegram 适配器仅负责平台协议转换与鉴权，核心处理仍走 Router/AgentLoop/ToolEngine。命令执行严格经过 Policy Gate，禁止直接 eval；依赖安装走 `deps.install` 系统事件并应用黑名单策略。当前仓库尚无运行时代码骨架，先补最小服务骨架再增量实现。
+**Architecture:** Use `internal/transport/message_bus.go` as the ingress boundary. Platform adapters should only handle protocol conversion, authentication, and reply delivery. Core execution should continue through Router, AgentLoop, and ToolEngine. Command handling must go through a policy gate rather than raw shell eval, and dependency installation should flow through a dedicated `deps.install` system event with blacklist-first validation.
 
 **Tech Stack:** Go, ConnectRPC, net/http, TOML config, discordgo, Telegram Bot API, Go testing
 
-## 本轮执行结果
+## Current Status
 
-- 已完成：架构级细化文档（`docs/architecture.md`、`docs/plans/2026-02-24-message-bus-refinement-design.md`）。
-- 未执行：Task 1-6 代码实现（全部延期）。
-- 下一步：当你授权可在隔离分支/worktree执行后，从 Task 1 开始按 TDD 落地。
+- Completed: architecture-level Message Bus refinement docs.
+- Deferred in this phase: runtime code implementation.
+- Next execution phase: start from Task 1 when code work is authorized on an isolated branch/worktree.
 
 ---
 
-### Task 1: 初始化最小运行时代码骨架
+### Task 1: Scaffold the minimum runtime skeleton
 
 **Files:**
 - Create: `cmd/agent-runtime/main.go`
@@ -30,7 +27,7 @@
 - Create: `config/example.toml`
 - Test: `cmd/agent-runtime/main_test.go`
 
-**Step 1: Write the failing test**
+**Step 1: Write the behavior spec**
 
 ```go
 func TestMainConfigPathRequired(t *testing.T) {
@@ -41,12 +38,12 @@ func TestMainConfigPathRequired(t *testing.T) {
 }
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 2: Run the focused check**
 
 Run: `go test ./cmd/agent-runtime -run TestMainConfigPathRequired -v`
-Expected: FAIL（run 未定义）
+Expected: FAIL (`run` is not defined yet)
 
-**Step 3: Write minimal implementation**
+**Step 3: Write the minimal implementation**
 
 ```go
 func run(args []string) error {
@@ -57,7 +54,7 @@ func run(args []string) error {
 }
 ```
 
-**Step 4: Run test to verify it passes**
+**Step 4: Re-run the focused check**
 
 Run: `go test ./cmd/agent-runtime -run TestMainConfigPathRequired -v`
 Expected: PASS
@@ -69,7 +66,7 @@ git add cmd/agent-runtime internal/core internal/session internal/tools config/e
 git commit -m "chore: scaffold minimal runtime skeleton"
 ```
 
-### Task 2: 实现 Message Bus 事件模型与路由状态机
+### Task 2: Implement the Message Bus event model and router states
 
 **Files:**
 - Create: `internal/transport/message_bus.go`
@@ -77,7 +74,7 @@ git commit -m "chore: scaffold minimal runtime skeleton"
 - Modify: `internal/core/router.go`
 - Modify: `internal/session/manager.go`
 
-**Step 1: Write the failing test**
+**Step 1: Write the behavior spec**
 
 ```go
 func TestBusRouter_MessageFlowState(t *testing.T) {
@@ -90,15 +87,16 @@ func TestBusRouter_MessageFlowState(t *testing.T) {
 }
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 2: Run the focused check**
 
 Run: `go test ./internal/transport -run TestBusRouter_MessageFlowState -v`
-Expected: FAIL（BusRouter 不存在）
+Expected: FAIL (`BusRouter` does not exist yet)
 
-**Step 3: Write minimal implementation**
+**Step 3: Write the minimal implementation**
 
 ```go
 type BusState string
+
 const (
     StateReceived  BusState = "received"
     StateValidated BusState = "validated"
@@ -109,7 +107,7 @@ const (
 )
 ```
 
-**Step 4: Run test to verify it passes**
+**Step 4: Re-run the focused check**
 
 Run: `go test ./internal/transport -run TestBusRouter_MessageFlowState -v`
 Expected: PASS
@@ -121,7 +119,7 @@ git add internal/transport/message_bus.go internal/transport/message_bus_test.go
 git commit -m "feat: add message bus event model and router states"
 ```
 
-### Task 3: 实现 Command Policy Gate（禁止 direct eval）
+### Task 3: Implement the command policy gate
 
 **Files:**
 - Create: `internal/tools/command_policy.go`
@@ -129,7 +127,7 @@ git commit -m "feat: add message bus event model and router states"
 - Modify: `internal/tools/registry.go`
 - Modify: `internal/transport/message_bus.go`
 
-**Step 1: Write the failing test**
+**Step 1: Write the behavior spec**
 
 ```go
 func TestCommandPolicy_RejectRawShellEval(t *testing.T) {
@@ -141,12 +139,12 @@ func TestCommandPolicy_RejectRawShellEval(t *testing.T) {
 }
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 2: Run the focused check**
 
 Run: `go test ./internal/tools -run TestCommandPolicy_RejectRawShellEval -v`
-Expected: FAIL（CommandPolicy 未实现）
+Expected: FAIL (`CommandPolicy` is not implemented yet)
 
-**Step 3: Write minimal implementation**
+**Step 3: Write the minimal implementation**
 
 ```go
 func (p *CommandPolicy) Validate(req CommandRequest) error {
@@ -157,7 +155,7 @@ func (p *CommandPolicy) Validate(req CommandRequest) error {
 }
 ```
 
-**Step 4: Run test to verify it passes**
+**Step 4: Re-run the focused check**
 
 Run: `go test ./internal/tools -run TestCommandPolicy_RejectRawShellEval -v`
 Expected: PASS
@@ -169,7 +167,7 @@ git add internal/tools/command_policy.go internal/tools/command_policy_test.go i
 git commit -m "feat: enforce command policy gate for bus commands"
 ```
 
-### Task 4: 实现 deps.install 黑名单优先策略
+### Task 4: Implement the `deps.install` blacklist-first policy
 
 **Files:**
 - Create: `internal/tools/deps_install.go`
@@ -177,7 +175,7 @@ git commit -m "feat: enforce command policy gate for bus commands"
 - Modify: `internal/tools/registry.go`
 - Modify: `config/example.toml`
 
-**Step 1: Write the failing test**
+**Step 1: Write the behavior spec**
 
 ```go
 func TestDepsInstallPolicy_BlockHighRiskPatterns(t *testing.T) {
@@ -189,18 +187,18 @@ func TestDepsInstallPolicy_BlockHighRiskPatterns(t *testing.T) {
 }
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 2: Run the focused check**
 
 Run: `go test ./internal/tools -run TestDepsInstallPolicy_BlockHighRiskPatterns -v`
 Expected: FAIL
 
-**Step 3: Write minimal implementation**
+**Step 3: Write the minimal implementation**
 
 ```go
 var blocked = []string{"curl|bash", "sudo ", "npm -g", "http://", "https://"}
 ```
 
-**Step 4: Run test to verify it passes**
+**Step 4: Re-run the focused check**
 
 Run: `go test ./internal/tools -run TestDepsInstallPolicy_BlockHighRiskPatterns -v`
 Expected: PASS
@@ -212,7 +210,7 @@ git add internal/tools/deps_install.go internal/tools/deps_install_test.go inter
 git commit -m "feat: add deps.install blacklist-first policy"
 ```
 
-### Task 5: Discord/Telegram Adapter 接入与统一错误审计
+### Task 5: Add Discord and Telegram adapters with unified error auditing
 
 **Files:**
 - Create: `internal/adapters/discord.go`
@@ -221,7 +219,7 @@ git commit -m "feat: add deps.install blacklist-first policy"
 - Modify: `internal/transport/message_bus.go`
 - Modify: `internal/tape/tape.go`
 
-**Step 1: Write the failing test**
+**Step 1: Write the behavior spec**
 
 ```go
 func TestAdapterErrorIncludesCorrelationID(t *testing.T) {
@@ -232,21 +230,21 @@ func TestAdapterErrorIncludesCorrelationID(t *testing.T) {
 }
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 2: Run the focused check**
 
 Run: `go test ./internal/adapters -run TestAdapterErrorIncludesCorrelationID -v`
 Expected: FAIL
 
-**Step 3: Write minimal implementation**
+**Step 3: Write the minimal implementation**
 
 ```go
 type PlatformError struct {
-    Code string
+    Code          string
     CorrelationID string
 }
 ```
 
-**Step 4: Run test to verify it passes**
+**Step 4: Re-run the focused check**
 
 Run: `go test ./internal/adapters -run TestAdapterErrorIncludesCorrelationID -v`
 Expected: PASS
@@ -258,33 +256,33 @@ git add internal/adapters internal/transport/message_bus.go internal/tape/tape.g
 git commit -m "feat: add bot adapters and correlation-id error auditing"
 ```
 
-### Task 6: 端到端回归与文档同步
+### Task 6: Run end-to-end validation and sync the docs
 
 **Files:**
 - Modify: `docs/architecture.md`
-- Modify: `docs/plans/2026-02-24-message-bus-refinement-design.md`
+- Modify: `docs/devlog/message-bus/refinement-design.md`
 - Test: `internal/...`, `cmd/...`
 
-**Step 1: Write the failing test**
+**Step 1: Write the behavior spec**
 
 ```go
 func TestBusCommandRejectedByPolicy(t *testing.T) {
-    // e2e-style unit: send command event with raw shell, expect policy reject
+    // end-to-end style unit: send a command event with raw shell input and expect policy rejection
 }
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 2: Run the focused check**
 
 Run: `go test ./... -run TestBusCommandRejectedByPolicy -v`
 Expected: FAIL
 
-**Step 3: Write minimal implementation**
+**Step 3: Write the minimal implementation**
 
 ```go
-// wire policy gate in bus command path and return structured reject error
+// wire the policy gate into the bus command path and return a structured reject error
 ```
 
-**Step 4: Run test to verify it passes**
+**Step 4: Run the full verification**
 
 Run: `go test ./...`
 Expected: PASS
@@ -292,7 +290,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add docs/architecture.md docs/plans/2026-02-24-message-bus-refinement-design.md
+git add docs/architecture.md docs/devlog/message-bus/refinement-design.md
 git add cmd internal config
 git commit -m "feat: complete message bus runtime with secure command and deps policy"
 ```
