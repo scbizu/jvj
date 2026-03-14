@@ -2,9 +2,11 @@ package core
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/scbizu/jvj/internal/tape"
+	"github.com/scbizu/jvj/internal/tools"
 )
 
 type recordingTapeWriter struct {
@@ -50,5 +52,36 @@ func TestAgentLoopRunAppendsAssistantEntry(t *testing.T) {
 	}
 	if writer.inputs[1].Kind != tape.EntryAssistant {
 		t.Fatalf("expected second append to be assistant, got %s", writer.inputs[1].Kind)
+	}
+}
+
+func TestAgentLoopUsesRegistryInsteadOfDirectCommandExecution(t *testing.T) {
+	writer := &recordingTapeWriter{}
+	router := &Router{}
+	reg := tools.NewRegistry()
+	loop := NewAgentLoop(router, writer, reg)
+
+	out, err := loop.Run(context.Background(), "session-1", "cmd: echo hello")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if strings.TrimSpace(out) != "hello" {
+		t.Fatalf("expected registry output hello, got %q", out)
+	}
+}
+
+func TestAgentLoopLeavesPlainRouterOutputUntouchedWhenExecutorPresent(t *testing.T) {
+	writer := &recordingTapeWriter{}
+	router := &Router{}
+	reg := tools.NewRegistry()
+	loop := NewAgentLoop(router, writer, reg)
+
+	out, err := loop.Run(context.Background(), "session-1", "hello")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "hello" {
+		t.Fatalf("expected plain router output to be returned unchanged, got %q", out)
 	}
 }
