@@ -21,6 +21,19 @@ type Tape struct {
 	UpdatedAt time.Time
 }
 
+type Anchor struct {
+	ID           string
+	SessionID    string
+	AtSeq        uint64
+	PrevAnchorID string
+	PhaseTag     string
+	Summary      string
+	State        map[string]any
+	SourceSeqs   []uint64
+	CreatedAt    time.Time
+	Owner        string
+}
+
 type Entry struct {
 	Seq         uint64
 	Kind        EntryKind
@@ -36,4 +49,13 @@ type AppendInput struct {
 	Content  string
 	Metadata map[string]any
 	Actor    string
+}
+
+type CreateAnchorInput struct {
+	PhaseTag   string
+	Summary    string
+	SourceSeqs []uint64
+	State      map[string]any
+	Owner      string
+	AtSeq      uint64
 }
