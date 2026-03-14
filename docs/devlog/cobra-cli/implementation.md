@@ -1,23 +1,23 @@
-# Cobra CLI Implementation Plan
+# Cobra CLI Implementation
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 将 `cmd/agent-runtime` 入口迁移到 Cobra，支持 `run` 子命令与 `version` 占位命令，并保持 config 必填语义。
+**Goal:** Migrate `cmd/agent-runtime` to Cobra, add a dedicated `run` command plus a placeholder `version` command, and preserve the required-config contract.
 
-**Architecture:** 在 `cmd/agent-runtime/main.go` 内引入 root/run/version 三层命令结构。`run` 通过 `RunE` 复用现有执行逻辑，配置来源为 `--config` 或位置参数（flag 优先）。测试聚焦 run 命令参数验证，保证行为不回归。
+**Architecture:** Build a small Cobra command tree around `root -> run -> version`. The runtime mode stays behind `run`, which reuses the existing startup path. Config resolution should come from `--config` or the positional argument, with the flag taking precedence. Verification should focus on command-entry behavior so the CLI surface does not regress.
 
 **Tech Stack:** Go, Cobra, Go testing
 
 ---
 
-### Task 1: 引入 Cobra 并重构命令入口
+### Task 1: Introduce Cobra and refactor the command entry
 
 **Files:**
 - Modify: `go.mod`
 - Modify: `cmd/agent-runtime/main.go`
 - Modify: `cmd/agent-runtime/main_test.go`
 
-**Step 1: Write the failing test**
+**Step 1: Write the behavior test**
 
 ```go
 func TestRunCmdConfigPathRequired(t *testing.T) {
@@ -30,12 +30,12 @@ func TestRunCmdConfigPathRequired(t *testing.T) {
 }
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 2: Run the focused test to confirm the gap**
 
 Run: `go test ./cmd/agent-runtime -run TestRunCmdConfigPathRequired -v`
-Expected: FAIL（`newRunCmd` 未定义）
+Expected: FAIL (`newRunCmd` is not defined yet)
 
-**Step 3: Write minimal implementation**
+**Step 3: Implement the `run` command entry**
 
 ```go
 func newRunCmd() *cobra.Command {
@@ -51,7 +51,7 @@ func newRunCmd() *cobra.Command {
 }
 ```
 
-**Step 4: Run test to verify it passes**
+**Step 4: Re-run the focused test**
 
 Run: `go test ./cmd/agent-runtime -run TestRunCmdConfigPathRequired -v`
 Expected: PASS
@@ -63,13 +63,13 @@ git add go.mod cmd/agent-runtime/main.go cmd/agent-runtime/main_test.go
 git commit -m "feat: migrate agent-runtime cmd to cobra"
 ```
 
-### Task 2: 增加 version 占位命令并回归验证
+### Task 2: Add the `version` placeholder command and verify runtime behavior
 
 **Files:**
 - Modify: `cmd/agent-runtime/main.go`
 - Modify: `cmd/agent-runtime/main_test.go`
 
-**Step 1: Write the failing test**
+**Step 1: Write the behavior test**
 
 ```go
 func TestVersionCmdPrintsPlaceholder(t *testing.T) {
@@ -85,12 +85,12 @@ func TestVersionCmdPrintsPlaceholder(t *testing.T) {
 }
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 2: Run the focused test to confirm the missing command**
 
 Run: `go test ./cmd/agent-runtime -run TestVersionCmdPrintsPlaceholder -v`
-Expected: FAIL（`newVersionCmd` 未定义）
+Expected: FAIL (`newVersionCmd` is not defined yet)
 
-**Step 3: Write minimal implementation**
+**Step 3: Implement the placeholder command**
 
 ```go
 func newVersionCmd() *cobra.Command {
@@ -104,7 +104,7 @@ func newVersionCmd() *cobra.Command {
 }
 ```
 
-**Step 4: Run test to verify it passes**
+**Step 4: Run the CLI regression checks**
 
 Run: `go test ./cmd/agent-runtime -run TestVersionCmdPrintsPlaceholder -v && go test ./...`
 Expected: PASS
