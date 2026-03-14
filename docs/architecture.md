@@ -381,8 +381,9 @@ type BusEvent struct {
 
 **Command Policy（禁止直接 eval）**
 - 不执行原始 shell 字符串，不使用 `sh -c` 作为主路径
-- 命令流程：`BusEvent(command)` → `Router.Parse` → `ToolRegistry.SchemaValidate` → `Sandbox Executor(argv)`
+- 命令流程：`BusEvent(command)` → `Router.Parse` → `ToolPlanner` → `ScriptBuilder` → `Sandbox Script Executor`
 - 执行约束：固定 cwd、非 root、超时、资源配额、输出大小上限、审计必填
+- 命令执行类 tool call 不直接下发 shell 字符串，而是先分析目标并生成一次性临时脚本再执行
 
 **Dependency Install Policy（黑名单优先）**
 - 提供 `deps.install` 系统事件，作为“系统准备动作”，与用户命令执行分流
@@ -394,13 +395,13 @@ type BusEvent struct {
 
 ### 3.3 Session Manager（会话管理器）
 
-管理所有活跃会话的生命周期。
+当前运行时按 **single session** 模式设计：单个 runtime 实例在任意时刻只维护一个活动会话，并为该会话提供恢复、重连和状态持久化能力。
 
 ```go
 type SessionManager struct {
-    sessions map[string]*Session
-    mu       sync.RWMutex
-    store    SessionStore
+    mu      sync.RWMutex
+    current *Session
+    store   SessionStore
 }
 
 type Session struct {
@@ -408,15 +409,17 @@ type Session struct {
     Conn      Conn
     Tape      *Tape
     State     SessionState
+    Attached  bool
     CreatedAt time.Time
     UpdatedAt time.Time
 }
 ```
 
 **职责：**
-- 会话创建/恢复/销毁
-- 心跳检测和超时清理
-- 会话状态持久化
+- 创建或恢复当前会话
+- 保证同一时刻只有一个活动流附着到当前会话
+- 心跳检测、超时清理和会话状态持久化
+- 为当前会话维护唯一的 Tape 引用
 
 ### 3.4 Router（路由层）
 
@@ -481,13 +484,10 @@ type LLMClient interface {
 
 ### 3.7 Tape Service
 
-Tape Service 不再只是“会话日志容器”，而是一个面向 Agent Runtime 的内部事实服务，采用“**事实层（Entry）+ 阶段切换层（Handoff/Anchor）+ 读取组装层（View）**”三层模型。
+Tape Service 不再只是“会话日志容器”，而是一个面向 **single session** 运行时的内部事实服务，采用“**事实层（Entry）+ 线性检查点层（Handoff/Anchor）+ 读取组装层（View）**”三层模型。
 
 ```go
-type TapeID string
-
 type Tape struct {
-    ID        TapeID
     SessionID string
     HeadSeq   uint64
     CreatedAt time.Time
@@ -495,57 +495,62 @@ type Tape struct {
 }
 
 type Entry struct {
-    TapeID      TapeID
     Seq         uint64
     Kind        EntryKind
     Content     string
     Metadata    map[string]any
-    SourceSeqs  []uint64
     CorrectsSeq *uint64
     CreatedAt   time.Time
     Actor       string
 }
 
 type Anchor struct {
-    ID              string
-    TapeID          TapeID
-    AtSeq           uint64
-    ParentAnchorIDs []string
-    Phase           string
-    Summary         string
-    State           map[string]any
-    SourceSeqs      []uint64
-    CreatedAt       time.Time
-    Owner           string
+    ID           string
+    SessionID    string
+    AtSeq        uint64
+    PrevAnchorID string
+    PhaseTag     string
+    Summary      string
+    State        map[string]any
+    SourceSeqs   []uint64
+    CreatedAt    time.Time
+    Owner        string
 }
 
 type ViewRequest struct {
-    TapeID        TapeID
-    Task          string
-    BudgetTokens  int
-    PreferredFrom []string
-    Policy        ViewPolicy
+    SessionID    string
+    Task         string
+    BudgetTokens int
 }
 
-func (s *TapeService) Append(ctx context.Context, tapeID TapeID, in AppendInput) (*Entry, error)
-func (s *TapeService) AppendCorrection(ctx context.Context, tapeID TapeID, correctsSeq uint64, in AppendInput) (*Entry, error)
-func (s *TapeService) CreateAnchor(ctx context.Context, tapeID TapeID, in CreateAnchorInput) (*Anchor, error)
-func (s *TapeService) Handoff(ctx context.Context, tapeID TapeID, in HandoffInput) (*Anchor, error)
+type View struct {
+    SessionID      string
+    AnchorID       string
+    IncludedSeqs   []uint64
+    OmittedRanges  [][2]uint64
+    DerivedSummary string
+    Provenance     []uint64
+}
+
+func (s *TapeService) Append(ctx context.Context, sessionID string, in AppendInput) (*Entry, error)
+func (s *TapeService) AppendCorrection(ctx context.Context, sessionID string, correctsSeq uint64, in AppendInput) (*Entry, error)
+func (s *TapeService) CreateAnchor(ctx context.Context, sessionID string, in CreateAnchorInput) (*Anchor, error)
+func (s *TapeService) Handoff(ctx context.Context, sessionID string, in HandoffInput) (*Anchor, error)
 func (s *TapeService) BuildView(ctx context.Context, req ViewRequest) (*View, error)
 ```
 
 **细化约束：**
-- **Tape**：时间顺序事实流，append-only，依赖单调递增 `Seq` 重放与审计。
+- **Tape**：一个 session 对应一条 Tape；当前设计不引入独立的 `TapeID` 命名空间。
 - **Entry**：最小不可变事实；纠错通过追加 `correction`，不能覆盖原事实。
-- **Anchor**：阶段检查点，定义“从哪里恢复执行上下文”，支持从最近相关锚点重建。
-- **Handoff**：强约束阶段切换，必须原子地产生 `handoff entry + new anchor`。
-- **View**：按任务读取时动态组装的上下文窗口，不直接继承整段历史，并显式返回 provenance。
+- **Anchor**：线性检查点；通过 `PrevAnchorID` 串联，不支持 fork-merge 图。
+- **Handoff**：顺序化阶段交接；先写 handoff 事实，再生成新的 anchor，不为多写者并发设计事务回滚语义。
+- **View**：总是从当前 session 的最新 anchor（若无则从头）组装上下文，不提供自定义恢复路径或缓存层。
 
 详细设计见：`docs/plans/2026-03-14-tape-service-design-refinement.md`。
 
 ### 3.8 Tool Engine（工具引擎）
 
-工具注册和执行。
+工具注册、执行规划和脚本化执行。
 
 ```go
 type ToolRegistry struct {
@@ -564,7 +569,35 @@ type ToolSchema struct {
     Input  jsonschema.Schema
     Output jsonschema.Schema
 }
+
+type ExecutionPlan struct {
+    Goal         string
+    Preconditions []CheckSpec
+    Steps        []PlanStep
+    Expected     []ArtifactSpec
+    Cleanup      []CleanupStep
+}
+
+type ScriptArtifact struct {
+    Path    string
+    Hash    string
+    Content string
+}
+
+type ExecutionResult struct {
+    ExitCode   int
+    Stdout     string
+    Stderr     string
+    Retryable  bool
+    Artifacts  []ArtifactSummary
+}
 ```
+
+**执行原则：**
+- 命令执行类 tool call 先生成 `ExecutionPlan`，再编译为一次性临时脚本。
+- `ScriptBuilder` 统一注入安全头、日志、cwd、超时和清理逻辑。
+- `Sandbox Script Executor` 只执行脚本并回传结果，不负责重新分析问题。
+- 失败优先基于已有 plan 与执行结果做局部修订，而不是每次重新从 bash 级别重试。
 
 ---
 
@@ -573,33 +606,32 @@ type ToolSchema struct {
 ### 4.1 单次交互（Turn）流程
 
 ```
-┌─────────┐     ┌─────────┐     ┌─────────┐     ┌─────────┐
-│  User   │────▶│ Router  │────▶│ Command │────▶│  Exec   │
-│ Input   │     │ .route  │     │ Check   │     │ Return  │
-└─────────┘     └────┬────┘     └────┬────┘     └─────────┘
-                     │               │
-                     │               ▼ (not command)
-                     │          ┌─────────┐
-                     │          │ Agent   │
-                     │          │ Loop    │
-                     │          └────┬────┘
-                     │               │
-                     │               ▼
-                     │          ┌─────────┐
-                     │          │ Model   │
-                     │          │ Runner  │
-                     │          └────┬────┘
-                     │               │
-                     │               ▼ (has tool call)
-                     │          ┌─────────┐
-                     │          │ Tool    │
-                     └──────────│ Exec    │
-                                └────┬────┘
-                                     │
-                                     ▼ (final text)
-                                ┌─────────┐
-                                │ Response│
-                                └─────────┘
+┌─────────┐     ┌─────────┐     ┌──────────┐     ┌────────────┐     ┌──────────┐
+│  User   │────▶│ Router  │────▶│ Planner  │────▶│ Script     │────▶│ Script   │
+│ Input   │     │ .route  │     │ / Check  │     │ Builder    │     │ Executor │
+└─────────┘     └────┬────┘     └────┬─────┘     └────┬───────┘     └────┬─────┘
+                     │               │                  │                  │
+                     │               ▼ (not command)    │                  │
+                     │          ┌─────────┐             │                  │
+                     │          │ Agent   │             │                  │
+                     │          │ Loop    │             │                  │
+                     │          └────┬────┘             │                  │
+                     │               │                  │                  │
+                     │               ▼                  │                  │
+                     │          ┌─────────┐             │                  │
+                     │          │ Model   │             │                  │
+                     │          │ Runner  │             │                  │
+                     │          └────┬────┘             │                  │
+                     │               │                  │                  │
+                     │               ▼ (has command-like tool call)        │
+                     │          ┌──────────────┐        │                  │
+                     └──────────│ Tool Planner │────────┘                  │
+                                └──────┬───────┘                           │
+                                       │                                   │
+                                       ▼ (final text / exec result)        ▼
+                                  ┌─────────┐                        ┌─────────┐
+                                  │ Response│                        │ Tape    │
+                                  └─────────┘                        └─────────┘
 ```
 
 ### 4.2 消息格式
