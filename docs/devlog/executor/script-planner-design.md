@@ -1,6 +1,6 @@
-# Executor 设计：Planner -> Script Builder -> Executor
+# Scripted Executor Design
 
-## 1. 背景
+## Background
 
 当前设计里，命令执行路径仍接近“解析后直接交给执行器跑命令”。这会带来两个问题：
 
@@ -9,7 +9,7 @@
 
 本设计将命令执行类 tool call 收敛为三段式：**先分析，再生成一次性临时脚本，最后执行脚本**。
 
-## 2. 设计目标
+## Goals
 
 1. 命令执行类 tool call 不直接携带最终 shell 命令。
 2. 执行前先产出结构化 `ExecutionPlan`。
