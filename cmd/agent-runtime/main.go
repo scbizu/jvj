@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/scbizu/jvj/internal/skills"
 	"github.com/spf13/cobra"
 )
 
@@ -17,8 +19,34 @@ func run(args []string, configPath string) error {
 	if configPath == "" {
 		return errors.New("config path is required")
 	}
+	if _, err := bootstrapBuiltinSkills(); err != nil {
+		return err
+	}
 	_ = configPath
 	return nil
+}
+
+func bootstrapBuiltinSkills() ([]skills.BuiltinSkillBundle, error) {
+	return loadBuiltinSkills([]string{
+		filepath.Join("skills", "builtins"),
+		filepath.Join("..", "..", "skills", "builtins"),
+	})
+}
+
+func loadBuiltinSkills(candidates []string) ([]skills.BuiltinSkillBundle, error) {
+	for _, root := range candidates {
+		if _, err := os.Stat(root); err == nil {
+			bundles, err := skills.LoadBuiltinSkillBundles(root)
+			if err != nil {
+				return nil, err
+			}
+			if len(bundles) == 0 {
+				return nil, errors.New("no built-in skill bundles found")
+			}
+			return bundles, nil
+		}
+	}
+	return nil, os.ErrNotExist
 }
 
 func newRunCmd() *cobra.Command {
