@@ -20,7 +20,7 @@
 | Tape | 只追加的会话历史记录，用于回放和审计 |
 | Anchor | 会话阶段标记点，用于状态恢复和上下文切换 |
 | Tool | 可执行的能力单元（函数调用、外部 API 等）|
-| Skill | 一组相关工具的集合，可动态加载 |
+| Skill | 启动时加载的高层语义能力模块，可编排 Tool、Tape 与运行时状态 |
 | ChannelAdapter | 外部平台消息适配器，负责平台协议与内部事件格式转换 |
 | BusEvent | Message Bus 内部标准事件（message/command/callback） |
 
@@ -598,6 +598,40 @@ type ExecutionResult struct {
 - `ScriptBuilder` 统一注入安全头、日志、cwd、超时和清理逻辑。
 - `Sandbox Script Executor` 只执行脚本并回传结果，不负责重新分析问题。
 - 失败优先基于已有 plan 与执行结果做局部修订，而不是每次重新从 bash 级别重试。
+
+### 3.9 Skill Engine（技能引擎）
+
+Skill Engine 负责内建 skills 的注册、初始化加载、匹配与调用。第一版只支持内建 skills，不支持运行时动态发现或目录扫描加载。
+
+```go
+type SkillSpec struct {
+    Name         string
+    Description  string
+    License      string
+    Compatibility string
+    Metadata     map[string]string
+    AllowedTools []string
+}
+
+type Skill interface {
+    Spec() SkillSpec
+    Match(ctx context.Context, input SkillInvocation) bool
+    Execute(ctx context.Context, input SkillInvocation) (*SkillResult, error)
+}
+
+type SkillRegistry struct {
+    skills map[string]Skill
+    order  []string
+}
+```
+
+**设计原则：**
+- Agent 在初始化阶段加载全部内建 skills，并建立 `name -> skill` 索引。
+- `SkillSpec` 在结构上对齐 `agentskills.io` 的元数据字段，但第一版不要求从 `SKILL.md` 文件系统加载。
+- Skill 属于高层语义能力，不等同于普通 Tool；它可以调用 Tool Engine、Tape Service 或其他运行时模块。
+- 第一版内建 `handoff` skill，负责生成标准化 handoff payload，并调用 Tape Service 完成交接。
+
+详细设计见：`docs/plans/2026-03-14-agent-skills-handoff-design.md`。
 
 ---
 
