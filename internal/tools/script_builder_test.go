@@ -39,3 +39,27 @@ func TestScriptBuilderIncludesPlanStepsInOrder(t *testing.T) {
 		t.Fatal("expected script steps to preserve plan order")
 	}
 }
+
+func TestScriptBuilderBuildsUniqueArtifactPaths(t *testing.T) {
+	builder := NewScriptBuilder("/tmp")
+
+	first, err := builder.Build(ExecutionPlan{
+		Goal:  "first",
+		Steps: []PlanStep{{Name: "first", Script: "echo first"}},
+	})
+	if err != nil {
+		t.Fatalf("build first script: %v", err)
+	}
+
+	second, err := builder.Build(ExecutionPlan{
+		Goal:  "second",
+		Steps: []PlanStep{{Name: "second", Script: "echo second"}},
+	})
+	if err != nil {
+		t.Fatalf("build second script: %v", err)
+	}
+
+	if first.Path == second.Path {
+		t.Fatalf("expected unique artifact paths, got %q", first.Path)
+	}
+}

@@ -3,8 +3,10 @@ package tools
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type ScriptArtifact struct {
@@ -35,9 +37,10 @@ func (b *ScriptBuilder) Build(plan ExecutionPlan) (*ScriptArtifact, error) {
 	}
 	content := body.String()
 	sum := sha256.Sum256([]byte(content))
+	hash := hex.EncodeToString(sum[:])
 	return &ScriptArtifact{
-		Path:    filepath.Join(b.baseDir, "executor.sh"),
-		Hash:    hex.EncodeToString(sum[:]),
+		Path:    filepath.Join(b.baseDir, fmt.Sprintf("executor-%s-%d.sh", hash[:12], time.Now().UnixNano())),
+		Hash:    hash,
 		Content: content,
 	}, nil
 }
