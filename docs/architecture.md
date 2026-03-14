@@ -479,30 +479,69 @@ type LLMClient interface {
 - 工具提示渐进式展开（`$toolname` 语法）
 - 有界循环防止无限工具调用
 
-### 3.7 Tape Service（日志服务）
+### 3.7 Tape Service
 
-只追加的会话历史管理。
+Tape Service 不再只是“会话日志容器”，而是一个面向 Agent Runtime 的内部事实服务，采用“**事实层（Entry）+ 阶段切换层（Handoff/Anchor）+ 读取组装层（View）**”三层模型。
 
 ```go
+type TapeID string
+
 type Tape struct {
+    ID        TapeID
     SessionID string
-    Entries   []Entry
-    store     TapeStore
+    HeadSeq   uint64
+    CreatedAt time.Time
+    UpdatedAt time.Time
 }
 
 type Entry struct {
-    ID        string
-    Type      EntryType // user | assistant | command | tool | anchor
-    Content   string
-    Metadata  map[string]any
-    Timestamp time.Time
+    TapeID      TapeID
+    Seq         uint64
+    Kind        EntryKind
+    Content     string
+    Metadata    map[string]any
+    SourceSeqs  []uint64
+    CorrectsSeq *uint64
+    CreatedAt   time.Time
+    Actor       string
 }
 
-func (t *Tape) Append(entry Entry) error
-func (t *Tape) Handoff(summary string, nextSteps []string) error
-func (t *Tape) Reset(archive bool) error
-func (t *Tape) Search(query string) ([]Entry, error)
+type Anchor struct {
+    ID              string
+    TapeID          TapeID
+    AtSeq           uint64
+    ParentAnchorIDs []string
+    Phase           string
+    Summary         string
+    State           map[string]any
+    SourceSeqs      []uint64
+    CreatedAt       time.Time
+    Owner           string
+}
+
+type ViewRequest struct {
+    TapeID        TapeID
+    Task          string
+    BudgetTokens  int
+    PreferredFrom []string
+    Policy        ViewPolicy
+}
+
+func (s *TapeService) Append(ctx context.Context, tapeID TapeID, in AppendInput) (*Entry, error)
+func (s *TapeService) AppendCorrection(ctx context.Context, tapeID TapeID, correctsSeq uint64, in AppendInput) (*Entry, error)
+func (s *TapeService) CreateAnchor(ctx context.Context, tapeID TapeID, in CreateAnchorInput) (*Anchor, error)
+func (s *TapeService) Handoff(ctx context.Context, tapeID TapeID, in HandoffInput) (*Anchor, error)
+func (s *TapeService) BuildView(ctx context.Context, req ViewRequest) (*View, error)
 ```
+
+**细化约束：**
+- **Tape**：时间顺序事实流，append-only，依赖单调递增 `Seq` 重放与审计。
+- **Entry**：最小不可变事实；纠错通过追加 `correction`，不能覆盖原事实。
+- **Anchor**：阶段检查点，定义“从哪里恢复执行上下文”，支持从最近相关锚点重建。
+- **Handoff**：强约束阶段切换，必须原子地产生 `handoff entry + new anchor`。
+- **View**：按任务读取时动态组装的上下文窗口，不直接继承整段历史，并显式返回 provenance。
+
+详细设计见：`docs/plans/2026-03-14-tape-service-design-refinement.md`。
 
 ### 3.8 Tool Engine（工具引擎）
 
