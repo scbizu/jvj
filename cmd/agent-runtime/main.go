@@ -31,9 +31,6 @@ func runWithIO(args []string, configPath string, in io.Reader, out io.Writer) er
 	if configPath == "" {
 		return errors.New("config path is required")
 	}
-	if _, err := os.Stat(configPath); err != nil {
-		return err
-	}
 	if _, err := bootstrapBuiltinSkills(); err != nil {
 		return err
 	}
@@ -60,9 +57,6 @@ func runWithIO(args []string, configPath string, in io.Reader, out io.Writer) er
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
-		}
-		if trimmed == "exit" {
-			break
 		}
 
 		output, err := loop.Run(ctx, activeSession.ID, line)

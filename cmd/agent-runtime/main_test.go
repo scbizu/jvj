@@ -72,6 +72,32 @@ func TestRunProcessesInteractiveInput(t *testing.T) {
 	}
 }
 
+func TestRunDoesNotRequireConfigFileToExist(t *testing.T) {
+	missingPath := filepath.Join(t.TempDir(), "missing.toml")
+	out := &bytes.Buffer{}
+
+	if err := runWithIO([]string{missingPath}, "", strings.NewReader("hello\n"), out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "hello") {
+		t.Fatalf("expected runtime output to include routed content, got %q", out.String())
+	}
+}
+
+func TestRunTreatsExitAsRegularInput(t *testing.T) {
+	configPath := writeTempConfig(t)
+	out := &bytes.Buffer{}
+
+	if err := runWithIO([]string{configPath}, "", strings.NewReader("exit\n"), out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "exit") {
+		t.Fatalf("expected runtime output to include exit input, got %q", out.String())
+	}
+}
+
 func writeTempConfig(t *testing.T) string {
 	t.Helper()
 
