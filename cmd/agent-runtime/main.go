@@ -20,11 +20,40 @@ import (
 
 var version = "dev"
 
+type runtimeSessionManager interface {
+	Open(string) (*session.Session, error)
+	Close(string) error
+}
+
+type runtimeLoop interface {
+	Run(context.Context, string, string) (string, error)
+}
+
+type runtimeDeps struct {
+	newSessionManager func() runtimeSessionManager
+	newLoop           func() runtimeLoop
+}
+
 func run(args []string, configPath string) error {
 	return runWithIO(args, configPath, os.Stdin, os.Stdout)
 }
 
 func runWithIO(args []string, configPath string, in io.Reader, out io.Writer) error {
+	return runWithDeps(args, configPath, in, out, runtimeDeps{
+		newSessionManager: func() runtimeSessionManager {
+			return session.NewManager()
+		},
+		newLoop: func() runtimeLoop {
+			return core.NewAgentLoop(
+				&core.Router{},
+				tape.NewService(tape.NewInMemoryStore()),
+				tools.NewRegistry(),
+			)
+		},
+	})
+}
+
+func runWithDeps(args []string, configPath string, in io.Reader, out io.Writer, deps runtimeDeps) (err error) {
 	if configPath == "" && len(args) > 0 {
 		configPath = args[0]
 	}
@@ -35,23 +64,22 @@ func runWithIO(args []string, configPath string, in io.Reader, out io.Writer) er
 		return err
 	}
 
-	sessionManager := session.NewManager()
+	sessionManager := deps.newSessionManager()
 	activeSession, err := sessionManager.Open("runtime")
 	if err != nil {
 		return err
 	}
 	defer func() {
-		_ = sessionManager.Close(activeSession.ID)
+		if closeErr := sessionManager.Close(activeSession.ID); err == nil && closeErr != nil {
+			err = closeErr
+		}
 	}()
 
-	loop := core.NewAgentLoop(
-		&core.Router{},
-		tape.NewService(tape.NewInMemoryStore()),
-		tools.NewRegistry(),
-	)
+	loop := deps.newLoop()
 
 	scanner := bufio.NewScanner(in)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
