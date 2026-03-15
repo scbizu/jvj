@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -16,8 +18,11 @@ func TestRunCmdConfigPathRequired(t *testing.T) {
 }
 
 func TestRunCmdConfigFlagWorks(t *testing.T) {
+	configPath := writeTempConfig(t)
 	cmd := newRunCmd()
-	cmd.SetArgs([]string{"--config", "config.toml"})
+	cmd.SetArgs([]string{"--config", configPath})
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&bytes.Buffer{})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -51,4 +56,28 @@ func TestLoadBuiltinSkillsRejectsEmptyBuiltinRoots(t *testing.T) {
 	if _, err := loadBuiltinSkills([]string{t.TempDir()}); err == nil {
 		t.Fatal("expected empty builtin roots to fail")
 	}
+}
+
+func TestRunProcessesInteractiveInput(t *testing.T) {
+	configPath := writeTempConfig(t)
+	in := strings.NewReader("hello\nexit\n")
+	out := &bytes.Buffer{}
+
+	if err := runWithIO([]string{configPath}, "", in, out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "hello") {
+		t.Fatalf("expected runtime output to include routed content, got %q", out.String())
+	}
+}
+
+func writeTempConfig(t *testing.T) string {
+	t.Helper()
+
+	configPath := filepath.Join(t.TempDir(), "runtime.toml")
+	if err := os.WriteFile(configPath, []byte("[server]\nport = 0\n"), 0o600); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+	return configPath
 }

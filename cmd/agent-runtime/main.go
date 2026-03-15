@@ -1,28 +1,82 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/scbizu/jvj/internal/core"
+	"github.com/scbizu/jvj/internal/session"
 	"github.com/scbizu/jvj/internal/skills"
+	"github.com/scbizu/jvj/internal/tape"
+	"github.com/scbizu/jvj/internal/tools"
 	"github.com/spf13/cobra"
 )
 
 var version = "dev"
 
 func run(args []string, configPath string) error {
+	return runWithIO(args, configPath, os.Stdin, os.Stdout)
+}
+
+func runWithIO(args []string, configPath string, in io.Reader, out io.Writer) error {
 	if configPath == "" && len(args) > 0 {
 		configPath = args[0]
 	}
 	if configPath == "" {
 		return errors.New("config path is required")
 	}
+	if _, err := os.Stat(configPath); err != nil {
+		return err
+	}
 	if _, err := bootstrapBuiltinSkills(); err != nil {
 		return err
 	}
-	_ = configPath
+
+	sessionManager := session.NewManager()
+	activeSession, err := sessionManager.Open("runtime")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = sessionManager.Close(activeSession.ID)
+	}()
+
+	loop := core.NewAgentLoop(
+		&core.Router{},
+		tape.NewService(tape.NewInMemoryStore()),
+		tools.NewRegistry(),
+	)
+
+	scanner := bufio.NewScanner(in)
+	ctx := context.Background()
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if trimmed == "exit" {
+			break
+		}
+
+		output, err := loop.Run(ctx, activeSession.ID, line)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(out, output); err != nil {
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -56,7 +110,7 @@ func newRunCmd() *cobra.Command {
 		Args:         cobra.MaximumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return run(args, configPath)
+			return runWithIO(args, configPath, cmd.InOrStdin(), cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "config file path")
