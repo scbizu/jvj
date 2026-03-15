@@ -26,6 +26,11 @@
 - Verify `go test ./...`
 - Keep docs aligned with the accepted implementation
 
+## Verification
+
+- `go test ./cmd/agent-runtime -v` — PASS
+- `go test ./...` — PASS
+
 When done, report:
 - What you created/updated
 - Test results
