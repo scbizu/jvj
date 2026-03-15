@@ -76,29 +76,24 @@ func TestRunProcessesInteractiveInput(t *testing.T) {
 	}
 }
 
-func TestRunDoesNotRequireConfigFileToExist(t *testing.T) {
-	missingPath := filepath.Join(t.TempDir(), "missing.toml")
-	out := &bytes.Buffer{}
-
-	if err := runWithIO([]string{missingPath}, "", strings.NewReader("hello\n"), out); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if !strings.Contains(out.String(), "hello") {
-		t.Fatalf("expected runtime output to include routed content, got %q", out.String())
+func TestRunRejectsMissingConfigFile(t *testing.T) {
+	err := runWithIO([]string{"missing.toml"}, "", strings.NewReader(""), &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected missing config file to fail")
 	}
 }
 
-func TestRunTreatsExitAsRegularInput(t *testing.T) {
+func TestRunStopsOnExitCommand(t *testing.T) {
 	configPath := writeTempConfig(t)
+	in := strings.NewReader("exit\nignored\n")
 	out := &bytes.Buffer{}
 
-	if err := runWithIO([]string{configPath}, "", strings.NewReader("exit\n"), out); err != nil {
+	if err := runWithIO([]string{configPath}, "", in, out); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !strings.Contains(out.String(), "exit") {
-		t.Fatalf("expected runtime output to include exit input, got %q", out.String())
+	if out.Len() != 0 {
+		t.Fatalf("expected exit to stop without emitting turn output, got %q", out.String())
 	}
 }
 

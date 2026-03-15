@@ -60,12 +60,15 @@ func runWithDeps(args []string, configPath string, in io.Reader, out io.Writer, 
 	if configPath == "" {
 		return errors.New("config path is required")
 	}
+	if _, err := os.Stat(configPath); err != nil {
+		return err
+	}
 	if _, err := bootstrapBuiltinSkills(); err != nil {
 		return err
 	}
 
 	sessionManager := deps.newSessionManager()
-	activeSession, err := sessionManager.Open("runtime")
+	activeSession, err := sessionManager.Open("interactive")
 	if err != nil {
 		return err
 	}
@@ -85,6 +88,9 @@ func runWithDeps(args []string, configPath string, in io.Reader, out io.Writer, 
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
+		}
+		if trimmed == "exit" {
+			break
 		}
 
 		output, err := loop.Run(ctx, activeSession.ID, line)
